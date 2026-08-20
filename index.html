@@ -1688,5 +1688,39 @@ document.addEventListener('touchend', e => {
 fit();
 go(0);
 </script>
+<script>
+/* ═══════════════ CONTROLE REMOTO (celular) ═══════════════
+   Só funciona quando esta página é aberta através do servidor
+   local em remote-control/server.js (http://<ip>:8787/).
+   Aberta como arquivo direto, esses fetches falham em silêncio
+   e a apresentação continua normal, sem nenhuma dependência. */
+(function remoteSync(){
+  let lastReported = -1;
+  function report(){
+    fetch('/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        index: cur,
+        total: slides.length,
+        title: slides[cur].dataset.title || '',
+        chapter: slides[cur].dataset.chapter || '',
+        notes: slides[cur].dataset.notes || '',
+        titles: slides.map(s => s.dataset.title || '')
+      })
+    }).catch(() => {});
+  }
+  setInterval(() => { if(cur !== lastReported){ lastReported = cur; report(); } }, 200);
+  setInterval(() => {
+    fetch('/cmd').then(r => r.json()).then(c => {
+      if(!c || !c.action) return;
+      if(c.action === 'next') next();
+      else if(c.action === 'prev') prev();
+      else if(c.action === 'goto' && typeof c.value === 'number') go(c.value);
+    }).catch(() => {});
+  }, 250);
+  report();
+})();
+</script>
 </body>
 </html>
