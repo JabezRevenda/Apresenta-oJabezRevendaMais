@@ -1688,38 +1688,57 @@ document.addEventListener('touchend', e => {
 fit();
 go(0);
 </script>
-<script>
-/* ═══════════════ CONTROLE REMOTO (celular) ═══════════════
-   Só funciona quando esta página é aberta através do servidor
-   local em remote-control/server.js (http://<ip>:8787/).
-   Aberta como arquivo direto, esses fetches falham em silêncio
-   e a apresentação continua normal, sem nenhuma dependência. */
-(function remoteSync(){
-  let lastReported = -1;
-  function report(){
-    fetch('/state', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        index: cur,
-        total: slides.length,
-        title: slides[cur].dataset.title || '',
-        chapter: slides[cur].dataset.chapter || '',
-        notes: slides[cur].dataset.notes || '',
-        titles: slides.map(s => s.dataset.title || '')
-      })
-    }).catch(() => {});
-  }
-  setInterval(() => { if(cur !== lastReported){ lastReported = cur; report(); } }, 200);
-  setInterval(() => {
-    fetch('/cmd').then(r => r.json()).then(c => {
-      if(!c || !c.action) return;
-      if(c.action === 'next') next();
-      else if(c.action === 'prev') prev();
-      else if(c.action === 'goto' && typeof c.value === 'number') go(c.value);
-    }).catch(() => {});
-  }, 250);
-  report();
+<script type="module">
+/* ═══════════════ CONTROLE REMOTO (celular, via web) ═══════════════
+   Sincroniza com controle.html através do Supabase (internet normal,
+   não depende de rede local). Se o Supabase estiver fora do ar, as
+   chamadas falham em silêncio e a apresentação segue normal por teclado. */
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SUPABASE_URL = 'https://dpzppenutrateiihqshu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_vE46je7CApv3ou5UYF07MA_-xgmt3QY';
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let lastReportedIndex = -1;
+let lastProcessedSeq = 0;
+
+async function pushState(){
+  if(cur === lastReportedIndex) return;
+  lastReportedIndex = cur;
+  await supabase.from('remote_state').update({
+    slide_index: cur,
+    total: slides.length,
+    title: slides[cur].dataset.title || '',
+    chapter: slides[cur].dataset.chapter || '',
+    notes: slides[cur].dataset.notes || '',
+    titles: slides.map(s => s.dataset.title || ''),
+    updated_at: new Date().toISOString()
+  }).eq('id', 1).select();
+}
+
+function applyCommand(row){
+  if(!row || !row.cmd_seq || row.cmd_seq <= lastProcessedSeq) return;
+  lastProcessedSeq = row.cmd_seq;
+  if(row.cmd_action === 'next') next();
+  else if(row.cmd_action === 'prev') prev();
+  else if(row.cmd_action === 'goto' && typeof row.cmd_value === 'number') go(row.cmd_value);
+}
+
+(async function remoteSync(){
+  try{
+    const { data } = await supabase.from('remote_state').select('cmd_seq').eq('id', 1).single();
+    if(data) lastProcessedSeq = data.cmd_seq || 0;
+  } catch(e) {}
+
+  supabase
+    .channel('apresentacao-treinamento')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'remote_state', filter: 'id=eq.1' }, payload => {
+      applyCommand(payload.new);
+    })
+    .subscribe();
+
+  setInterval(pushState, 300);
+  pushState();
 })();
 </script>
 </body>
